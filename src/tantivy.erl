@@ -4,7 +4,7 @@
 -include_lib("kernel/include/logger.hrl").
 
 %% apis
--export([child_spec/1, start_link/1, add/2, remove/1, update/2, search/2]).
+-export([child_spec/1, start_link/1, add/2, remove/1, update/2, search/1, search/2]).
 -export([init/1, terminate/2, handle_call/3, handle_info/2, handle_cast/2]).
 
 %% the data record to hold server state
@@ -21,19 +21,41 @@ child_spec([{command, Command}]) ->
       start => {?MODULE, start_link, [Command]},
       type => worker}.
 
+%% add a document to the database
+-spec add(integer(), map()) -> ok.
 add(Id, Doc) -> cast({add, Id, Doc}).
 
+%% remove a document from the database
+-spec remove(integer()) -> ok.
 remove(Id) -> cast({remove, Id}).
 
+%% update a document to a new version
+-spec update(integer(), map()) -> ok.
 update(Id, Doc) -> cast({update, Id, Doc}).
 
-search(Query, Limit) -> call({search, Query, Limit}).
-    
+%% perform a query with default option
+-spec search(binary()) -> list().
+search(Query) ->
+    call({search, Query, default_search_opts()}).
+
+%% perform a query with options
+-spec search(binary(), proplists:proplist()) -> list().
+search(Query, Opts) ->
+    Map = lists:foldl(fun({Key, Value}, Acc) -> map:put(Key, Value, Acc) end,
+		      default_search_opts(), Opts),
+    call({search, Query, Map}).
+
 call(Request) ->
     binary_to_term(gen_server:call(?MODULE, term_to_binary(Request))).
 
 cast(Request) ->
     gen_server:cast(?MODULE, term_to_binary(Request)).
+
+default_search_opts() ->
+    case application:get_env(?MODULE, default_search_opts) of
+	undefined -> #{limit => 25};
+	{ok, Val} -> Val
+    end.
 
 % server side
 init(Command) ->
