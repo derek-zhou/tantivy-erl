@@ -12,51 +12,57 @@ defmodule Tantivy do
 
   @doc false
   @spec start_link(String.t()) :: GenServer.on_start()
-  def start_link(command) do
-    GenServer.start_link(__MODULE__, command, name: __MODULE__)
+  def start_link(name: name, command: command) do
+    GenServer.start_link(__MODULE__, command, name: name)
   end
 
   @doc """
   add a document to the database
   """
-  @spec add(integer, map) :: :ok
-  def add(id, doc), do: cast({:add, id, doc})
+  @spec add(GenServer.server(), integer, map) :: :ok
+  def add(server, id, doc) do
+    cast(server, {:add, id, doc})
+  end
 
   @doc """
   remove a document from the database
   """
-  @spec remove(integer) :: :ok
-  def remove(id), do: cast(%{command: :remove, id: id})
+  @spec remove(GenServer.server(), integer) :: :ok
+  def remove(server, id) do
+    cast(server, %{command: :remove, id: id})
+  end
 
   @doc """
   update a document to a new version
   """
-  @spec update(integer, map) :: :ok
-  def update(id, doc), do: cast(%{command: :update, id: id, doc: doc})
+  @spec update(GenServer.server(), integer, map) :: :ok
+  def update(server, id, doc) do
+    cast(server, %{command: :update, id: id, doc: doc})
+  end
 
   @doc """
   perform a query with default option
   """
-  @spec search(String.t()) :: list
-  def search(query) do
-    call(%{command: :search, query: query, opts: default_search_opts()})
+  @spec search(GenServer.server(), String.t()) :: list
+  def search(server, query) do
+    call(server, %{command: :search, query: query, opts: default_search_opts()})
   end
 
   @doc """
   perform a query with options
   """
-  @spec search(binary, keyword) :: list
-  def search(query, opts) do
+  @spec search(GenServer.server(), binary, keyword) :: list
+  def search(server, query, opts) do
     opts = Enum.reduce(opts, default_search_opts(), fn {k, v}, a -> Map.put(a, k, v) end)
-    call(%{command: :search, query: query, opts: opts})
+    call(server, %{command: :search, query: query, opts: opts})
   end
 
-  defp call(request) do
-    Jason.decode!(GenServer.call(__MODULE__, Jason.encode!(request)))
+  defp call(server, request) do
+    Jason.decode!(GenServer.call(server, Jason.encode!(request)))
   end
 
-  defp cast(request) do
-    GenServer.cast(__MODULE__, Jason.encode!(request))
+  defp cast(server, request) do
+    GenServer.cast(server, Jason.encode!(request))
   end
 
   defp default_search_opts() do
