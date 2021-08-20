@@ -2,6 +2,7 @@ defmodule Tantivy do
   @moduledoc """
   Documentation for `Tantivy`.
   """
+  @default_limit 100
 
   require Logger
   use GenServer
@@ -19,57 +20,39 @@ defmodule Tantivy do
   @doc """
   add a document to the database
   """
-  @spec add(GenServer.server(), integer, map) :: :ok
-  def add(server, id, doc) do
-    cast(server, {:add, id, doc})
-  end
+  @spec add(GenServer.server(), map) :: :ok
+  def add(server, doc), do: cast(server, %{add: true}, [doc])
 
   @doc """
   remove a document from the database
   """
   @spec remove(GenServer.server(), integer) :: :ok
-  def remove(server, id) do
-    cast(server, %{command: :remove, id: id})
-  end
-
-  @doc """
-  update a document to a new version
-  """
-  @spec update(GenServer.server(), integer, map) :: :ok
-  def update(server, id, doc) do
-    cast(server, %{command: :update, id: id, doc: doc})
-  end
+  def remove(server, id), do: cast(server, %{remove: id})
 
   @doc """
   perform a query with default option
   """
   @spec search(GenServer.server(), String.t()) :: list
-  def search(server, query) do
-    call(server, %{command: :search, query: query, opts: default_search_opts()})
-  end
+  def search(server, query), do: call(server, %{search: query, limit: @default_limit})
 
   @doc """
   perform a query with options
   """
-  @spec search(GenServer.server(), binary, keyword) :: list
-  def search(server, query, opts) do
-    opts = Enum.reduce(opts, default_search_opts(), fn {k, v}, a -> Map.put(a, k, v) end)
-    call(server, %{command: :search, query: query, opts: opts})
-  end
+  @spec search(GenServer.server(), String.t(), integer) :: list
+  def search(server, query, limit), do: call(server, %{search: query, limit: limit})
 
   defp call(server, request) do
-    Jason.decode!(GenServer.call(server, Jason.encode!(request)))
+    server
+    |> GenServer.call(Jason.encode!(request))
+    |> Enum.map(&Jason.decode!(&1))
   end
 
   defp cast(server, request) do
-    GenServer.cast(server, Jason.encode!(request))
+    GenServer.cast(server, {Jason.encode!(request), []})
   end
 
-  defp default_search_opts() do
-    case Application.get_env(:tantivy, :default_search_opts) do
-      nil -> %{limit: 25}
-      v -> v
-    end
+  defp cast(server, request, list) do
+    GenServer.cast(server, {Jason.encode!(request), Enum.map(list, &Jason.encode!(&1))})
   end
 
   # server side
@@ -77,7 +60,7 @@ defmodule Tantivy do
   def init(command) do
     Process.flag(:trap_exit, true)
     Logger.notice("port server to #{command} booting")
-    port = Port.open({:spawn, Command}, [{:packet, 4}, :binary])
+    port = Port.open({:spawn, command}, [{:packet, 4}, :binary])
     {:ok, %__MODULE__{port: port}}
   end
 
@@ -90,13 +73,24 @@ defmodule Tantivy do
   end
 
   # each message has a 4 byte prefix:
-  # <<"P", 0, 0, 0>> for oneway message: Posted Write
-  # <<"R", seq :: 24>> for message needing a reply: Request
-  # <<"C", seq :: 24>> for reply to a previous request: Completion
+  # <<"P", 0, 0, 0>> for oneway message: Posted request without data
+  # <<"p", 0, 0, 0>> for oneway message: Posted request with data
+  # <<"R", seq :: 24>> for message needing a reply: Request without data
+  # <<"r", seq :: 24>> for message needing a reply: Request with data
+  # <<"D", 0, 0, 0>> data packet following request end of request 
+  # <<"d", 0, 0, 0>> data packet following request, end of request
+  # <<"C", seq :: 24>> for reply to a previous request: Completion, end of reply
+  # <<"c", seq :: 24>> for reply to a previous request: Completion, to be continued
 
   @impl true
-  def handle_cast(data, %__MODULE__{port: port} = state) do
-    Port.command(port, [<<"P", 0, 0, 0>> | data])
+  def handle_cast({command, []}, %__MODULE__{port: port} = state) do
+    Port.command(port, [<<"P", 0, 0, 0>> | command])
+    {:noreply, state}
+  end
+
+  def handle_cast({command, list}, %__MODULE__{port: port} = state) do
+    Port.command(port, [<<"p", 0, 0, 0>> | command])
+    send_data(port, list)
     {:noreply, state}
   end
 
@@ -108,7 +102,7 @@ defmodule Tantivy do
 
       false ->
         Port.command(port, [<<"R", seq::24>> | data])
-        {:noreply, %{state | seq: next_seq(seq), map: %{map | seq => from}}}
+        {:noreply, %{state | seq: next_seq(seq), map: Map.put(map, seq, {from, []})}}
     end
   end
 
@@ -117,7 +111,25 @@ defmodule Tantivy do
         {port, {:data, <<"C", seq::24, data::binary>>}},
         %__MODULE__{port: port, map: map} = state
       ) do
-    {:noreply, %{state | map: deliver_msg(seq, data, map)}}
+    case byte_size(data) do
+      0 -> {:noreply, %{state | map: deliver_msg(map, seq)}}
+      _ -> {:noreply, %{state | map: map |> receive_data(data, seq) |> deliver_msg(seq)}}
+    end
+  end
+
+  @impl true
+  def handle_info(
+        {port, {:data, <<"c", seq::24, data::binary>>}},
+        %__MODULE__{port: port, map: map} = state
+      ) do
+    {:noreply, %{state | map: receive_data(map, data, seq)}}
+  end
+
+  defp send_data(port, [head]), do: Port.command(port, [<<"D", 0, 0, 0>> | head])
+
+  defp send_data(port, [head | tail]) do
+    Port.command(port, [<<"d", 0, 0, 0>> | head])
+    send_data(port, tail)
   end
 
   # legal sequence number is 0 ~ 2^24-1
@@ -126,8 +138,15 @@ defmodule Tantivy do
 
   defp flush_port(port, map) do
     receive do
+      {port, {:data, <<"c", seq::24, data::binary>>}} ->
+        flush_port(port, receive_data(map, data, seq))
+
       {port, {:data, <<"C", seq::24, data::binary>>}} ->
-        map = deliver_msg(seq, data, map)
+        map =
+          case byte_size(data) do
+            0 -> deliver_msg(map, seq)
+            _ -> map |> receive_data(data, seq) |> deliver_msg(seq)
+          end
 
         case Enum.empty?(map) do
           true -> :ok
@@ -139,8 +158,14 @@ defmodule Tantivy do
     end
   end
 
-  defp deliver_msg(seq, data, map) do
-    map |> Map.fetch!(seq) |> GenServer.reply(data)
+  defp deliver_msg(map, seq) do
+    {from, buf} = Map.fetch!(map, seq)
+    GenServer.reply(from, Enum.reverse(buf))
     Map.delete(map, seq)
+  end
+
+  def receive_data(map, data, seq) do
+    {from, buf} = Map.fetch!(map, seq)
+    %{map | seq => {from, [data | buf]}}
   end
 end
