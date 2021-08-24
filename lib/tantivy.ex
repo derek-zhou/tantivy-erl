@@ -12,22 +12,35 @@ defmodule Tantivy do
             map: %{}
 
   @doc false
+  @spec start(String.t()) :: GenServer.on_start()
+  def start(name: name, command: command) do
+    GenServer.start(__MODULE__, command, name: name)
+  end
+
+  @doc false
   @spec start_link(String.t()) :: GenServer.on_start()
   def start_link(name: name, command: command) do
     GenServer.start_link(__MODULE__, command, name: name)
   end
 
   @doc """
-  add a document to the database
+  add one or more document to the database
   """
-  @spec add(GenServer.server(), map) :: :ok
-  def add(server, doc), do: cast(server, %{add: true}, [doc])
+  @spec add(GenServer.server(), map | list) :: :ok
+  def add(server, doc) when is_map(doc), do: cast(server, %{add: true}, [doc])
+  def add(server, docs) when is_list(docs), do: cast(server, %{add: true}, docs)
 
   @doc """
   remove a document from the database
   """
   @spec remove(GenServer.server(), integer) :: :ok
   def remove(server, id), do: cast(server, %{remove: id})
+
+  @doc """
+  update a document from the database
+  """
+  @spec update(GenServer.server(), integer, map) :: :ok
+  def update(server, id, doc), do: cast(server, %{remove: id}, [doc])
 
   @doc """
   perform a query with default option
