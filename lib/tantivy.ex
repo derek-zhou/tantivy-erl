@@ -72,7 +72,7 @@ defmodule Tantivy do
   @impl true
   def init(command) do
     Process.flag(:trap_exit, true)
-    Logger.notice("port server to #{command} booting")
+    Logger.info("port server to #{command} booting")
     port = Port.open({:spawn, command}, [{:packet, 4}, :binary])
     {:ok, %__MODULE__{port: port}}
   end
