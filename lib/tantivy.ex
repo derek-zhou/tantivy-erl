@@ -37,22 +37,18 @@ defmodule Tantivy do
   def remove(server, id), do: cast(server, %{remove: id})
 
   @doc """
-  update a document from the database
+  update a document in the database
   """
   @spec update(GenServer.server(), integer, map) :: :ok
   def update(server, id, doc), do: cast(server, %{remove: id}, [doc])
 
   @doc """
-  perform a query with default option
-  """
-  @spec search(GenServer.server(), String.t()) :: list
-  def search(server, query), do: call(server, %{search: query, limit: @default_limit})
-
-  @doc """
-  perform a query with options
+  perform a query with limit 
   """
   @spec search(GenServer.server(), String.t(), integer) :: list
-  def search(server, query, limit), do: call(server, %{search: query, limit: limit})
+  def search(server, query, limit \\ @default_limit) do
+    call(server, %{search: query, limit: limit})
+  end
 
   defp call(server, request) do
     server
@@ -90,8 +86,8 @@ defmodule Tantivy do
   # <<"p", 0, 0, 0>> for oneway message: Posted request with data
   # <<"R", seq :: 24>> for message needing a reply: Request without data
   # <<"r", seq :: 24>> for message needing a reply: Request with data
-  # <<"D", 0, 0, 0>> data packet following request end of request 
-  # <<"d", 0, 0, 0>> data packet following request, end of request
+  # <<"D", 0, 0, 0>> data packet following request, end of request 
+  # <<"d", 0, 0, 0>> data packet following request, to be continued
   # <<"C", seq :: 24>> for reply to a previous request: Completion, end of reply
   # <<"c", seq :: 24>> for reply to a previous request: Completion, to be continued
 

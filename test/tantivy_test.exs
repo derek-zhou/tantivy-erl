@@ -5,8 +5,7 @@ defmodule TantivyTest do
   setup_all do
     Tantivy.start(
       name: DUT,
-      command:
-        "tantivy port -i test-index/"
+      command: "tantivy port -i test-index/"
     )
 
     :ok

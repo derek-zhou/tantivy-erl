@@ -104,7 +104,8 @@ This is where all the fun begin:
 ``` elixir
 alias MyApp.MyIndex
 
-list = Tantivy.search(MyIndex, query)
+list = Tantivy.search(MyIndex, query) # default to at most 100 results
+list = Tantivy.search(MyIndex, query, 200)
 
 ```
 
