@@ -6,13 +6,15 @@ defmodule TantivyTest do
     Tantivy.start(
       name: DUT,
       command:
-        "/home/derek/projects/tantivy-cli/target/release/tantivy port -i /home/derek/test-index/"
+        "tantivy port -i test-index/"
     )
 
     :ok
     on_exit(fn -> GenServer.stop(DUT) end)
   end
 
+  # right now there is no way to enforce barrier in a read-after-write situation, so the test
+  # may fail and is for illustration only
   test "simple write read" do
     Tantivy.remove(DUT, 0)
     Tantivy.add(DUT, %{id: 0, title: "test"})
