@@ -52,16 +52,16 @@ defmodule Tantivy do
 
   defp call(server, request) do
     server
-    |> GenServer.call(Jason.encode!(request))
-    |> Enum.map(&Jason.decode!(&1))
+    |> GenServer.call(JSON.encode!(request))
+    |> Enum.map(&JSON.decode!(&1))
   end
 
   defp cast(server, request) do
-    GenServer.cast(server, {Jason.encode!(request), []})
+    GenServer.cast(server, {JSON.encode!(request), []})
   end
 
   defp cast(server, request, list) do
-    GenServer.cast(server, {Jason.encode!(request), Enum.map(list, &Jason.encode!(&1))})
+    GenServer.cast(server, {JSON.encode!(request), Enum.map(list, &JSON.encode!(&1))})
   end
 
   # server side
